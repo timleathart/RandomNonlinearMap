@@ -134,30 +134,8 @@ public class RandomNonlinearMap extends Filter implements OptionHandler,
    * <p/>
    * 
    * <pre>
-   * -C
-   *  Center (rather than standardize) the
-   *  data and compute PCA using the covariance (rather
-   *   than the correlation) matrix.
-   * </pre>
-   * 
-   * <pre>
-   * -R &lt;num&gt;
-   *  Retain enough PC attributes to account
-   *  for this proportion of variance in the original data.
-   *  (default: 0.95)
-   * </pre>
-   * 
-   * <pre>
-   * -A &lt;num&gt;
-   *  Maximum number of attributes to include in 
-   *  transformed attribute names.
-   *  (-1 = include all, default: 5)
-   * </pre>
-   * 
-   * <pre>
-   * -M &lt;num&gt;
-   *  Maximum number of PC attributes to retain.
-   *  (-1 = include all, default: -1)
+   * -N &lt;num&gt;
+   *	The number of nonlinear features to generate
    * </pre>
    * 
    * <!-- options-end -->
