@@ -14,7 +14,8 @@
  */
 
 /*
- * RandomNonlinearMap.java
+ * PrincipalComponents.java
+ * Copyright (C) 2007-2012 University of Waikato, Hamilton, New Zealand
  */
 
 package weka.filters.unsupervised.attribute;
@@ -30,7 +31,13 @@ import weka.filters.Filter;
 import weka.filters.UnsupervisedFilter;
 
 /**
- * <!-- globalinfo-start --> Performs a random nonlinear map on a dataset.
+ * <!-- globalinfo-start --> Performs a principal components analysis and
+ * transformation of the data.<br/>
+ * Dimensionality reduction is accomplished by choosing enough eigenvectors to
+ * account for some percentage of the variance in the original data -- default
+ * 0.95 (95%).<br/>
+ * Based on code of the attribute selection scheme 'PrincipalComponents' by Mark
+ * Hall and Gabi Schmidberger.
  * <p/>
  * <!-- globalinfo-end -->
  * 
@@ -38,13 +45,37 @@ import weka.filters.UnsupervisedFilter;
  * <p/>
  * 
  * <pre>
- * -N &lt;num&gt;
- *	The number of nonlinear features to generate
+ * -C
+ *  Center (rather than standardize) the
+ *  data and compute PCA using the covariance (rather
+ *   than the correlation) matrix.
+ * </pre>
+ * 
+ * <pre>
+ * -R &lt;num&gt;
+ *  Retain enough PC attributes to account
+ *  for this proportion of variance in the original data.
+ *  (default: 0.95)
+ * </pre>
+ * 
+ * <pre>
+ * -A &lt;num&gt;
+ *  Maximum number of attributes to include in 
+ *  transformed attribute names.
+ *  (-1 = include all, default: 5)
+ * </pre>
+ * 
+ * <pre>
+ * -M &lt;num&gt;
+ *  Maximum number of PC attributes to retain.
+ *  (-1 = include all, default: -1)
  * </pre>
  * 
  * <!-- options-end -->
  * 
- * @author Tim Leathart (tml15@students.waikato.ac.nz)
+ * @author Mark Hall (mhall@cs.waikato.ac.nz) -- attribute selection code
+ * @author Gabi Schmidberger (gabi@cs.waikato.ac.nz) -- attribute selection code
+ * @author fracpete (fracpete at waikato dot ac dot nz) -- filter code
  * @version $Revision: 11516 $
  */
 public class RandomNonlinearMap extends Filter implements OptionHandler,
@@ -79,6 +110,12 @@ public class RandomNonlinearMap extends Filter implements OptionHandler,
 
   /** Filter for turning nominal values into numeric ones. */
   protected NominalToBinary m_NominalToBinaryFilter;
+
+  /** Filter that randomly projects the data, before a nonlinearity is applied */
+  protected RandomProjection m_RandomProjectionFilter;
+
+  /** Filter that normalizes the data after random projection, so the nonlinearity is meaningful **/
+  protected Normalize m_NormalizeFilter;
 
   /** Filter for removing class attribute, nominal attributes with 0 or 1 value. */
   protected Remove m_AttributeFilter;
@@ -134,8 +171,30 @@ public class RandomNonlinearMap extends Filter implements OptionHandler,
    * <p/>
    * 
    * <pre>
-   * -N &lt;num&gt;
-   *	The number of nonlinear features to generate
+   * -C
+   *  Center (rather than standardize) the
+   *  data and compute PCA using the covariance (rather
+   *   than the correlation) matrix.
+   * </pre>
+   * 
+   * <pre>
+   * -R &lt;num&gt;
+   *  Retain enough PC attributes to account
+   *  for this proportion of variance in the original data.
+   *  (default: 0.95)
+   * </pre>
+   * 
+   * <pre>
+   * -A &lt;num&gt;
+   *  Maximum number of attributes to include in 
+   *  transformed attribute names.
+   *  (-1 = include all, default: 5)
+   * </pre>
+   * 
+   * <pre>
+   * -M &lt;num&gt;
+   *  Maximum number of PC attributes to retain.
+   *  (-1 = include all, default: -1)
    * </pre>
    * 
    * <!-- options-end -->
@@ -189,6 +248,7 @@ public class RandomNonlinearMap extends Filter implements OptionHandler,
 
     // attributes
     result.enable(Capability.NUMERIC_ATTRIBUTES);
+    result.enable(Capability.NOMINAL_ATTRIBUTES);
     result.enable(Capability.DATE_ATTRIBUTES);
     result.enable(Capability.MISSING_VALUES);
 
@@ -216,23 +276,11 @@ public class RandomNonlinearMap extends Filter implements OptionHandler,
    */
   protected Instances determineOutputFormat(Instances inputFormat)
     throws Exception {
-    ArrayList<Attribute> attributes;
+    ArrayList<Attribute> attributes = new ArrayList<Attribute>();
     int i;
-    int j;
-
-    attributes = new ArrayList<Attribute>();
-
-    m_weights = new double[m_NumNonlinearComponents][m_NumAttribs];
-    m_biases = new double[m_NumNonlinearComponents];
-
-    Random random = new Random(m_RandomSeed);
 
     // Fill weights/biases matrices from uniform distribution [-1, 1]
     for(i = 0; i < m_NumNonlinearComponents; i++) {
-      for (j = 0; j < m_NumAttribs; j++) {
-        m_weights[i][j] = (random.nextDouble() * 2) - 1;
-      }
-      m_biases[i] = (random.nextDouble() * 2) - 1;
       attributes.add(new Attribute("random feature " + i));
     }
 
@@ -262,21 +310,36 @@ public class RandomNonlinearMap extends Filter implements OptionHandler,
   protected Instance convertInstance(Instance instance) throws Exception {
     Instance result;
     double[] newVals;
-    int i;
     int j;
 
-    System.out.println(m_HasClass);
+    Instance tempInst = (Instance) instance.copy();
+
+    m_ReplaceMissingFilter.input(tempInst);
+    m_ReplaceMissingFilter.batchFinished();
+    tempInst = m_ReplaceMissingFilter.output();
+
+    m_NominalToBinaryFilter.input(tempInst);
+    m_NominalToBinaryFilter.batchFinished();
+    tempInst = m_NominalToBinaryFilter.output();
+
+    m_RandomProjectionFilter.input(tempInst);
+    m_RandomProjectionFilter.batchFinished();
+    tempInst = m_RandomProjectionFilter.output();
+
+    m_NormalizeFilter.input(tempInst);
+    m_NormalizeFilter.batchFinished();
+    tempInst = m_NormalizeFilter.output();
+
+    if (m_AttributeFilter != null) {
+      m_AttributeFilter.input(tempInst);
+      m_AttributeFilter.batchFinished();
+      tempInst = m_AttributeFilter.output();
+    }
 
     newVals = new double[m_OutputNumAtts];
 
     for (j = 0; j < m_NumNonlinearComponents; j++) {
-      double sum = m_biases[j];
-
-      for (i = 0; i < m_NumAttribs; i++) {
-        sum += m_weights[j][i] * instance.value(i);
-      }
-
-      newVals[j] = Math.cos(sum);
+      newVals[j] = 1.0 / (1.0 + Math.exp(-tempInst.value(j))); //
     }
 
     if (m_HasClass) {
@@ -321,6 +384,16 @@ public class RandomNonlinearMap extends Filter implements OptionHandler,
     m_TrainInstances = Filter.useFilter(m_TrainInstances,
       m_NominalToBinaryFilter);
 
+    m_RandomProjectionFilter = new RandomProjection();
+    m_RandomProjectionFilter.setOptions(new String[] {"-N", "" + m_NumNonlinearComponents});
+    m_RandomProjectionFilter.setInputFormat(m_TrainInstances);
+    m_TrainInstances = Filter.useFilter(m_TrainInstances, m_RandomProjectionFilter);
+
+    m_NormalizeFilter = new Normalize();
+    m_NormalizeFilter.setOptions(new String[] {"-S", "10.0", "-T", "-5.0"});
+    m_NormalizeFilter.setInputFormat(m_TrainInstances);
+    m_TrainInstances = Filter.useFilter(m_TrainInstances, m_NormalizeFilter);
+
     // delete any attributes with only one distinct value or are all missing
     deleteCols = new Vector<Integer>();
     for (i = 0; i < m_TrainInstances.numAttributes(); i++) {
@@ -358,6 +431,8 @@ public class RandomNonlinearMap extends Filter implements OptionHandler,
     m_TransformedFormat = determineOutputFormat(m_TrainInstances);
     setOutputFormat(m_TransformedFormat);
 
+    m_NumAttribs = m_TransformedFormat.numAttributes();
+
     m_TrainInstances = null;
   }
 
@@ -377,6 +452,7 @@ public class RandomNonlinearMap extends Filter implements OptionHandler,
     m_OutputNumAtts = -1;
     m_AttributeFilter = null;
     m_NominalToBinaryFilter = null;
+    m_RandomProjectionFilter = null;
 
     return false;
   }
